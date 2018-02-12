@@ -25,9 +25,18 @@ public abstract class AsyncTask<Params, Result> {
         setOnMessage(new MessageListener<ParamsHolder>() {
             @Override
             public void on(MessageEvent<ParamsHolder> s) {
-                AsyncTask construct = getReflect().construct(eval(s.getData().type), new Object[0]);
-                Object doInBackground = construct.doInBackground(s.getData().params);
-                postMessage(ResultHolder.build(doInBackground));
+                if (!s.getData().type.matches("([a-z]+\\.([a-z]+\\.)*[A-Za-z0-9]+)")) {
+                    throw new IllegalArgumentException(s.getData().type + " is not a valid class name");
+                }
+                AsyncTask construct = (AsyncTask) getReflect().construct(eval(s.getData().type), new Object[0]);
+                Object doInBackground;
+                try {
+                    doInBackground = construct.doInBackground(s.getData().params);
+                    postMessage(ResultHolder.build(doInBackground));
+                } catch (Exception ex) {
+                    postMessage(ResultHolder.build(ex));
+                    
+                }
             }
         });
     }
@@ -47,17 +56,32 @@ public abstract class AsyncTask<Params, Result> {
         }
 
     }
-    
+
     @JsType(isNative = true, namespace = JsPackage.GLOBAL, name = "Object")
     static class ResultHolder<Result> {
 
         private Result result;
+        private String exceptionType;
+        private String exceptionMessage;
 
         @JsOverlay
         static <Result> ResultHolder<Result> build(Result result) {
-            ResultHolder resultHolder = new ResultHolder();
+            ResultHolder<Result> resultHolder = new ResultHolder();
             resultHolder.result = result;
             return resultHolder;
+        }
+
+        @JsOverlay
+        static ResultHolder build(Exception result) {
+            ResultHolder resultHolder = new ResultHolder();
+            resultHolder.exceptionType = result.getClass().getName();
+            resultHolder.exceptionMessage = result.getMessage();
+            return resultHolder;
+        }
+
+        @JsOverlay
+        private boolean failed() {
+            return exceptionType != null;
         }
 
     }
@@ -65,15 +89,17 @@ public abstract class AsyncTask<Params, Result> {
     private Worker<ParamsHolder> worker;
 
     public AsyncTask() {
-        try {
+        if (isWorkerSupported()) {
             worker = new Worker(GWT.getModuleBaseURL() + GWT.getModuleName() + ".worker.js");
             worker.setOnMessage(new MessageListener<ResultHolder<Result>>() {
                 public void on(MessageEvent<ResultHolder<Result>> s) {
-                    done(s.getData().result);
+                    if (s.getData().failed()) {
+                        onError(s.getData().exceptionType, s.getData().exceptionMessage);
+                    } else {
+                        done(s.getData().result);
+                    }
                 }
             });
-        } catch (Throwable t) {
-
         }
     }
 
@@ -81,19 +107,30 @@ public abstract class AsyncTask<Params, Result> {
         worker.postMessage(ParamsHolder.build(getClass().getName(), p));
     }
 
-    protected abstract Result doInBackground(Params p);
-    
+    protected abstract Result doInBackground(Params p) throws Exception;
+
     protected abstract void done(Result r);
 
+    protected void onError(String type, String message) {
+    }
+
     @JsProperty(namespace = JsPackage.GLOBAL, name = "onmessage")
-    public static native void setOnMessage(MessageListener listener);
+    private static native void setOnMessage(MessageListener listener);
 
     @JsMethod(namespace = JsPackage.GLOBAL, name = "postMessage")
-    static native void postMessage(ResultHolder p);
+    private static native void postMessage(ResultHolder p);
 
     @JsMethod(namespace = JsPackage.GLOBAL, name = "eval")
-    public static native <T> T eval(String s);
+    private static native <T> T eval(String s);
 
     @JsProperty(namespace = JsPackage.GLOBAL, name = "Reflect")
-    public static native Reflect<AsyncTask> getReflect();
+    private static native <T> Reflect<T> getReflect();
+
+    @JsProperty(namespace = JsPackage.GLOBAL, name = "Worker")
+    private static native <Func> Func worker();
+
+    private boolean isWorkerSupported() {
+        return worker() != null;
+    }
+    
 }

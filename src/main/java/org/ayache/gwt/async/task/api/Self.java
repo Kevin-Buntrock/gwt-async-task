@@ -14,11 +14,11 @@ import jsinterop.annotations.JsType;
  * @author Ayache
  */
 @JsType(isNative = true, namespace = JsPackage.GLOBAL, name = "self")
-public class Self {
+interface Self {
     
     @JsProperty(name = "onmessage")
-    native MessageListener getOnMessage();
+    MessageListener getOnMessage();
 
     @JsProperty(name = "onmessage")
-    native void setOnMessage(MessageListener listener);
+    void setOnMessage(MessageListener listener);
 }
