@@ -13,6 +13,7 @@ import jsinterop.annotations.JsType;
 /**
  *
  * @author Ayache
+ * @param <P>
  */
 @JsType(isNative = true, namespace = JsPackage.GLOBAL)
 public class Worker<P> {
@@ -23,6 +24,12 @@ public class Worker<P> {
 
     @JsMethod(name = "postMessage")
     public native void postMessage(P s);
+
+    @JsMethod(name = "postMessage")
+    public native <Transferable> void postMessage(P s, Transferable[] transferList);
+
+    @JsMethod(name = "terminate")
+    public native void terminate();
 
     @JsProperty(name = "onmessage")
     public native void setOnMessage(MessageListener listener);

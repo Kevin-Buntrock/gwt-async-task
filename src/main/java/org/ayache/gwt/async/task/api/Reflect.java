@@ -17,4 +17,8 @@ import jsinterop.annotations.JsType;
 public interface Reflect<T> {
     
     T construct(Object cls, Object[] args);
+    
+    <O> O get(T object, String key);
+    
+    boolean set(T object, String key, Object value);
 }

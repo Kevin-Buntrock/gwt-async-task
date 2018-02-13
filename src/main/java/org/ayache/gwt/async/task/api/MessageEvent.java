@@ -12,6 +12,7 @@ import jsinterop.annotations.JsType;
 /**
  *
  * @author Ayache
+ * @param <DataType>
  */
 @JsType(isNative = true, namespace = JsPackage.GLOBAL)
 public interface MessageEvent<DataType> {

@@ -6,6 +6,8 @@
 package org.ayache.gwt.async.task.api;
 
 import com.google.gwt.core.client.GWT;
+import com.google.gwt.core.client.JavaScriptObject;
+import com.google.gwt.typedarrays.shared.ArrayBuffer;
 import jsinterop.annotations.JsMethod;
 import jsinterop.annotations.JsOverlay;
 import jsinterop.annotations.JsPackage;
@@ -25,27 +27,53 @@ public abstract class AsyncTask<Params, Result> {
         setOnMessage(new MessageListener<ParamsHolder>() {
             @Override
             public void on(MessageEvent<ParamsHolder> s) {
-                if (!s.getData().type.matches("([a-z]+\\.([a-z]+\\.)*[A-Za-z0-9]+)")) {
-                    throw new IllegalArgumentException(s.getData().type + " is not a valid class name");
+                if (!s.getData().type.matches("[a-z]+\\.([a-z]+\\.)*([a-zA-Z][A-Za-z\\d]*\\$?)+")) {
+                    throw new IllegalArgumentException(s.getData().type + " is not a valid class name. Implementation of AsyncTask can't be anonymous inner class.");
                 }
-                AsyncTask construct = (AsyncTask) getReflect().construct(eval(s.getData().type), new Object[0]);
-                Object doInBackground;
+                Object eval = evalQuietly(s.getData().type.replace('$', '.'));
+                if (eval == null) {
+                    throw new IllegalArgumentException(s.getData().type + " must be annotated with @JsType");
+                }
                 try {
+                    AsyncTask construct = (AsyncTask) getReflect().construct(eval, new Object[0]);
+                    Object doInBackground;
                     doInBackground = construct.doInBackground(s.getData().params);
-                    postMessage(ResultHolder.build(doInBackground));
+                    ResultHolder build = ResultHolder.build(doInBackground);
+                    Object[] transferList = build.getTransferList();
+                    if (transferList != null) {
+                        postMessage(build, transferList);
+                    }
                 } catch (Exception ex) {
                     postMessage(ResultHolder.build(ex));
-                    
+                    error(ex);
                 }
             }
         });
     }
 
     @JsType(isNative = true, namespace = JsPackage.GLOBAL, name = "Object")
-    static class ParamsHolder {
+    static class ParamsHolder<Param> {
 
         private String type;
-        private Object params;
+        private Param params;
+
+        @JsOverlay
+        private final Object[] getTransferList() {
+            if (arrayBufferType().equals(type(params))) {
+                ArrayBuffer[] transferList = new ArrayBuffer[1];
+                transferList[0] = (ArrayBuffer) params;
+                return transferList;
+            } else if (isArray(params) && arrayBufferType().equals(type(getReflect().get(params, "0")))) {
+                Object result = params;
+                params = (Param) JavaScriptObject.createObject();
+                Number get = getReflect().get(result, "length");
+                for (int i = 0; i < get.intValue(); i++) {
+                    getReflect().set(params, String.valueOf(i), getReflect().get(result, String.valueOf(i)));
+                }
+                return (Object[]) result;
+            }
+            return null;
+        }
 
         @JsOverlay
         static ParamsHolder build(String type, Object params) {
@@ -63,6 +91,24 @@ public abstract class AsyncTask<Params, Result> {
         private Result result;
         private String exceptionType;
         private String exceptionMessage;
+
+        @JsOverlay
+        private final Object[] getTransferList() {
+            if (arrayBufferType().equals(type(result))) {
+                ArrayBuffer[] transferList = new ArrayBuffer[1];
+                transferList[0] = (ArrayBuffer) result;
+                return transferList;
+            } else if (isArray(result) && arrayBufferType().equals(type(getReflect().get(result, "0")))) {
+                Object res = result;
+                result = (Result) JavaScriptObject.createObject();
+                Number get = getReflect().get(res, "length");
+                for (int i = 0; i < get.intValue(); i++) {
+                    getReflect().set(result, String.valueOf(i), getReflect().get(res, String.valueOf(i)));
+                }
+                return (Object[]) res;
+            }
+            return null;
+        }
 
         @JsOverlay
         static <Result> ResultHolder<Result> build(Result result) {
@@ -89,7 +135,7 @@ public abstract class AsyncTask<Params, Result> {
     private Worker<ParamsHolder> worker;
 
     public AsyncTask() {
-        if (isWorkerSupported()) {
+        if (isMainThread()) {
             worker = new Worker(GWT.getModuleBaseURL() + GWT.getModuleName() + ".worker.js");
             worker.setOnMessage(new MessageListener<ResultHolder<Result>>() {
                 public void on(MessageEvent<ResultHolder<Result>> s) {
@@ -104,7 +150,13 @@ public abstract class AsyncTask<Params, Result> {
     }
 
     public void execute(Params p) {
-        worker.postMessage(ParamsHolder.build(getClass().getName(), p));
+        ParamsHolder paramsHolder = ParamsHolder.build(getClass().getName(), p);
+        Object[] transferList = paramsHolder.getTransferList();
+        if (transferList != null) {
+            worker.postMessage(paramsHolder, transferList);
+        } else {
+            worker.postMessage(paramsHolder);
+        }
     }
 
     protected abstract Result doInBackground(Params p) throws Exception;
@@ -118,19 +170,43 @@ public abstract class AsyncTask<Params, Result> {
     private static native void setOnMessage(MessageListener listener);
 
     @JsMethod(namespace = JsPackage.GLOBAL, name = "postMessage")
-    private static native void postMessage(ResultHolder p);
+    private static native <Transferable> void postMessage(ResultHolder p);
+
+    @JsMethod(namespace = JsPackage.GLOBAL, name = "postMessage")
+    private static native <Transferable> void postMessage(ResultHolder p, Transferable[] transferList);
 
     @JsMethod(namespace = JsPackage.GLOBAL, name = "eval")
-    private static native <T> T eval(String s);
+    private static native <T> T eval(String s) throws Exception;
 
     @JsProperty(namespace = JsPackage.GLOBAL, name = "Reflect")
     private static native <T> Reflect<T> getReflect();
 
-    @JsProperty(namespace = JsPackage.GLOBAL, name = "Worker")
-    private static native <Func> Func worker();
+    @JsProperty(namespace = JsPackage.GLOBAL, name = "window")
+    private static native <Func> Func window();
 
-    private boolean isWorkerSupported() {
-        return worker() != null;
+    @JsMethod(namespace = "console", name = "error")
+    protected static native void error(Object o);
+
+    @JsMethod(namespace = JsPackage.GLOBAL, name = "Object.prototype.toString.call")
+    private static native String type(Object o);
+
+    @JsMethod(namespace = JsPackage.GLOBAL, name = "Array.isArray")
+    private static native boolean isArray(Object o);
+
+    @JsMethod(namespace = JsPackage.GLOBAL, name = "ArrayBuffer.prototype.toString")
+    private static native String arrayBufferType();
+
+    private boolean isMainThread() {
+        return window() != null;
     }
-    
+
+    private static Object evalQuietly(String s) {
+        try {
+            return eval(s);
+        } catch (Exception ex) {
+            return null;
+        }
+
+    }
+
 }
