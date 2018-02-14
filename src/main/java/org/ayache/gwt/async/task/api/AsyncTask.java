@@ -7,7 +7,13 @@ package org.ayache.gwt.async.task.api;
 
 import com.google.gwt.core.client.GWT;
 import com.google.gwt.core.client.JavaScriptObject;
+import com.google.gwt.json.client.JSONNumber;
+import com.google.gwt.json.client.JSONObject;
 import com.google.gwt.typedarrays.shared.ArrayBuffer;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import jsinterop.annotations.JsMethod;
 import jsinterop.annotations.JsOverlay;
 import jsinterop.annotations.JsPackage;
@@ -37,13 +43,19 @@ public abstract class AsyncTask<Params, Result> {
                 try {
                     AsyncTask construct = (AsyncTask) getReflect().construct(eval, new Object[0]);
                     Object doInBackground;
-                    doInBackground = construct.doInBackground(s.getData().params);
+                    if ("Number".equals(s.getData().dataType)) {
+                        doInBackground = construct.doInBackground(new JSONObject((JavaScriptObject)s.getData().params).get("Number").isNumber().doubleValue());
+                    } else {
+                        doInBackground = construct.doInBackground(s.getData().params);
+                    }
                     ResultHolder build = ResultHolder.build(doInBackground);
-                    Object[] transferList = build.getTransferList();
+                    Object[] transferList = getTransferList(build.result);
                     if (transferList != null) {
                         postMessage(build, transferList);
+                    } else {
+                        postMessage(build);
                     }
-                } catch (Exception ex) {
+                } catch (Throwable ex) {
                     postMessage(ResultHolder.build(ex));
                     error(ex);
                 }
@@ -52,34 +64,26 @@ public abstract class AsyncTask<Params, Result> {
     }
 
     @JsType(isNative = true, namespace = JsPackage.GLOBAL, name = "Object")
-    static class ParamsHolder<Param> {
+    static class ParamsHolder {
 
         private String type;
-        private Param params;
-
-        @JsOverlay
-        private final Object[] getTransferList() {
-            if (arrayBufferType().equals(type(params))) {
-                ArrayBuffer[] transferList = new ArrayBuffer[1];
-                transferList[0] = (ArrayBuffer) params;
-                return transferList;
-            } else if (isArray(params) && arrayBufferType().equals(type(getReflect().get(params, "0")))) {
-                Object result = params;
-                params = (Param) JavaScriptObject.createObject();
-                Number get = getReflect().get(result, "length");
-                for (int i = 0; i < get.intValue(); i++) {
-                    getReflect().set(params, String.valueOf(i), getReflect().get(result, String.valueOf(i)));
-                }
-                return (Object[]) result;
-            }
-            return null;
-        }
+        private Object params;
+        private String dataType;
 
         @JsOverlay
         static ParamsHolder build(String type, Object params) {
             ParamsHolder paramsHolder = new ParamsHolder();
             paramsHolder.type = type;
-            paramsHolder.params = params;
+            if (params instanceof String) {
+                paramsHolder.params = params;
+            } else if (params instanceof Number) {
+                paramsHolder.dataType = "Number";
+                paramsHolder.params = JavaScriptObject.createObject();
+                JSONObject jSONObject = new JSONObject((JavaScriptObject) paramsHolder.params);
+                jSONObject.put(paramsHolder.dataType, new JSONNumber(((Number) params).doubleValue()));
+            } else {
+                paramsHolder.params = (JavaScriptObject) params;
+            }
             return paramsHolder;
         }
 
@@ -93,32 +97,21 @@ public abstract class AsyncTask<Params, Result> {
         private String exceptionMessage;
 
         @JsOverlay
-        private final Object[] getTransferList() {
-            if (arrayBufferType().equals(type(result))) {
-                ArrayBuffer[] transferList = new ArrayBuffer[1];
-                transferList[0] = (ArrayBuffer) result;
-                return transferList;
-            } else if (isArray(result) && arrayBufferType().equals(type(getReflect().get(result, "0")))) {
-                Object res = result;
-                result = (Result) JavaScriptObject.createObject();
-                Number get = getReflect().get(res, "length");
-                for (int i = 0; i < get.intValue(); i++) {
-                    getReflect().set(result, String.valueOf(i), getReflect().get(res, String.valueOf(i)));
-                }
-                return (Object[]) res;
-            }
-            return null;
-        }
-
-        @JsOverlay
         static <Result> ResultHolder<Result> build(Result result) {
-            ResultHolder<Result> resultHolder = new ResultHolder();
-            resultHolder.result = result;
-            return resultHolder;
+            if (result instanceof String || result instanceof Number) {
+                ResultHolder<Result> resultHolder = new ResultHolder<Result>();
+                resultHolder.result = result;
+                return resultHolder;
+            } else {
+                ResultHolder<JavaScriptObject> resultHolder = new ResultHolder<JavaScriptObject>();
+                resultHolder.result = (JavaScriptObject) result;
+                return (ResultHolder<Result>) resultHolder;
+            }
+
         }
 
         @JsOverlay
-        static ResultHolder build(Exception result) {
+        static ResultHolder build(Throwable result) {
             ResultHolder resultHolder = new ResultHolder();
             resultHolder.exceptionType = result.getClass().getName();
             resultHolder.exceptionMessage = result.getMessage();
@@ -151,11 +144,15 @@ public abstract class AsyncTask<Params, Result> {
 
     public void execute(Params p) {
         ParamsHolder paramsHolder = ParamsHolder.build(getClass().getName(), p);
-        Object[] transferList = paramsHolder.getTransferList();
-        if (transferList != null) {
-            worker.postMessage(paramsHolder, transferList);
-        } else {
-            worker.postMessage(paramsHolder);
+        Object[] transferList = getTransferList(paramsHolder.params);
+        try {
+            if (transferList != null) {
+                worker.postMessage(paramsHolder, transferList);
+            } else {
+                worker.postMessage(paramsHolder);
+            }
+        } catch (Exception ex) {
+            Logger.getLogger("").log(Level.SEVERE, "Params type of AsyncTask<Params, Result> must be JavascriptObject or @JsType annotated class :", ex);
         }
     }
 
@@ -187,9 +184,6 @@ public abstract class AsyncTask<Params, Result> {
     @JsMethod(namespace = "console", name = "error")
     protected static native void error(Object o);
 
-    @JsMethod(namespace = JsPackage.GLOBAL, name = "Object.prototype.toString.call")
-    private static native String type(Object o);
-
     @JsMethod(namespace = JsPackage.GLOBAL, name = "Array.isArray")
     private static native boolean isArray(Object o);
 
@@ -206,7 +200,27 @@ public abstract class AsyncTask<Params, Result> {
         } catch (Exception ex) {
             return null;
         }
+    }
 
+    private static final Object[] getTransferList(Object params) {
+        if (params instanceof String || params instanceof Number) {
+            return null;
+        }
+        if (TypeHelper.isTransferable(params)) {
+            ArrayBuffer[] transferList = new ArrayBuffer[1];
+            transferList[0] = (ArrayBuffer) params;
+            return transferList;
+        } else {
+            JSONObject jsParams = new JSONObject((JavaScriptObject) params);
+            List transferList = new ArrayList();
+            for (String key : jsParams.keySet()) {
+                JSONObject object = jsParams.get(key).isObject();
+                if (object != null && TypeHelper.isTransferable(object.getJavaScriptObject())) {
+                    transferList.add(object.getJavaScriptObject());
+                }
+            }
+            return transferList.toArray();
+        }
     }
 
 }

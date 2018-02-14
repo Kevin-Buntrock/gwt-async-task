@@ -10,6 +10,7 @@ import jsinterop.annotations.JsFunction;
 /**
  *
  * @author Ayache
+ * @param <DataType>
  */
 @JsFunction
 public interface MessageListener<DataType> {
