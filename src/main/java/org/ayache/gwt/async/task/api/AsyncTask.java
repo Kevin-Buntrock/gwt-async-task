@@ -7,7 +7,6 @@ package org.ayache.gwt.async.task.api;
 
 import com.google.gwt.core.client.GWT;
 import com.google.gwt.core.client.JavaScriptObject;
-import com.google.gwt.json.client.JSONNumber;
 import com.google.gwt.json.client.JSONObject;
 import java.util.ArrayList;
 import java.util.List;
@@ -23,68 +22,67 @@ import jsinterop.annotations.JsType;
  *
  * @author Ayache
  * @param <Params>
+ * @param <Progress>
  * @param <Result>
  */
 @JsType
 @SuppressWarnings("UseSpecificCatch")
-public abstract class AsyncTask<Params, Result> {
+public abstract class AsyncTask<Params, Progress, Result> {
 
     @JsType(isNative = true, namespace = JsPackage.GLOBAL, name = "Object")
-    static class ParamsHolder {
+    static class DataHolder<Type> {
+
+        protected Type data;
+        protected String dataType;
+        protected boolean progressData;
+
+        @JsOverlay
+        static <T extends DataHolder> T build(Object data) {
+            DataHolder dataHolder = new DataHolder();
+            if (data instanceof String || data instanceof Double) {
+                dataHolder.data = data;
+            } else if (data instanceof Number) {
+                dataHolder.dataType = data.getClass().getName();
+                dataHolder.data = Double.valueOf(String.valueOf(data));
+            } else if (data instanceof JavaScriptObject) {
+                dataHolder.data = (JavaScriptObject) data;
+            } else {
+                Logger.getLogger("").log(Level.SEVERE, "Params type of AsyncTask<Params, Result> must be JavascriptObject or @JsType annotated class");
+            }
+            return (T) dataHolder;
+        }
+
+        @JsOverlay
+        static <T extends DataHolder> T build(Object data, boolean progressData) {
+            DataHolder dataHolder = build(data);
+            dataHolder.progressData = true;
+            return (T) dataHolder;
+        }
+
+    }
+
+    @JsType(isNative = true, namespace = JsPackage.GLOBAL, name = "Object")
+    static class ParamsHolder extends DataHolder {
 
         private String type;
-        private Object params;
-        private String dataType;
 
         @JsOverlay
         static ParamsHolder build(String type, Object params) {
             ParamsHolder paramsHolder = new ParamsHolder();
             paramsHolder.type = type;
-            if (params instanceof String) {
-                paramsHolder.params = params;
-            } else if (params instanceof Number) {
-                paramsHolder.dataType = "Number";
-                paramsHolder.params = JavaScriptObject.createObject();
-                JSONObject jSONObject = new JSONObject((JavaScriptObject) paramsHolder.params);
-                jSONObject.put(paramsHolder.dataType, new JSONNumber(((Number) params).doubleValue()));
-            } else if (params instanceof JavaScriptObject) {
-                paramsHolder.params = (JavaScriptObject) params;
-            } else {
-                Logger.getLogger("").log(Level.SEVERE, "Params type of AsyncTask<Params, Result> must be JavascriptObject or @JsType annotated class");
-            }
+            DataHolder dataHolder = DataHolder.build(params);
+            paramsHolder.dataType = dataHolder.dataType;
+            paramsHolder.data = dataHolder.data;
             return paramsHolder;
         }
 
     }
 
     @JsType(isNative = true, namespace = JsPackage.GLOBAL, name = "Object")
-    static class ResultHolder<Result> {
+    static class ResultHolder<Result> extends DataHolder<Result> {
 
-        private Result result;
-        private String dataType;
         private String exceptionType;
         private String exceptionMessage;
-
-        @JsOverlay
-        static <Result> ResultHolder<Result> build(Result result) {
-            if (result instanceof String || result instanceof Double) {
-                ResultHolder<Result> resultHolder = new ResultHolder<>();
-                resultHolder.result = result;
-                return resultHolder;
-            } else if (result instanceof Number) {
-                ResultHolder<Number> resultHolder = new ResultHolder<>();
-                resultHolder.dataType = result.getClass().getName();
-                resultHolder.result = Double.valueOf(String.valueOf(result));
-                return (ResultHolder<Result>) resultHolder;
-            } else if (result instanceof JavaScriptObject) {
-                ResultHolder<JavaScriptObject> resultHolder = new ResultHolder<>();
-                resultHolder.result = (JavaScriptObject) result;
-                return (ResultHolder<Result>) resultHolder;
-            } else {
-                Logger.getLogger("").log(Level.SEVERE, "Result type of AsyncTask<Params, Result> must be JavascriptObject or @JsType annotated class");
-            }
-            return new ResultHolder<>();
-        }
 
         @JsOverlay
         static ResultHolder build(Throwable result) {
@@ -112,13 +110,13 @@ public abstract class AsyncTask<Params, Result> {
             }
             try {
                 Object doInBackground;
-                if ("Number".equals(s.getData().dataType)) {
-                    doInBackground = construct.doInBackground(new JSONObject((JavaScriptObject) s.getData().params).get("Number").isNumber().doubleValue());
+                if (s.getData().dataType != null) {
+                    doInBackground = construct.doInBackground(castDoubleTo(s.getData().dataType, Double.valueOf(s.getData().data.toString())));
                 } else {
-                    doInBackground = construct.doInBackground(s.getData().params);
+                    doInBackground = construct.doInBackground(s.getData().data);
                 }
                 ResultHolder build = ResultHolder.build(doInBackground);
-                Object[] transferList = getTransferList(build.result);
+                Object[] transferList = getTransferList(build.data);
                 if (transferList != null) {
                     postMessage(build, transferList);
                 } else {
@@ -160,41 +158,7 @@ public abstract class AsyncTask<Params, Result> {
         }
     }
 
-    private Worker<ParamsHolder> worker;
-
-    public void execute(Params p) {
-        if (worker == null) {
-            worker = new Worker(GWT.<WorkerScriptFactory>create(WorkerScriptFactory.class
-            ).getWorkerScriptURL());
-            worker.setOnMessage((MessageListener<ResultHolder<Result>>) (MessageEvent<ResultHolder<Result>> s) -> {
-                if (s.getData().failed()) {
-                    onError(s.getData().exceptionType, s.getData().exceptionMessage);
-                } else {
-                    if (s.getData().dataType != null) {
-                        done(castDoubleTo(s.getData().dataType, (Double) s.getData().result));
-                    } else {
-                        done(s.getData().result);
-                    }
-                }
-            });
-        }
-        ParamsHolder paramsHolder = ParamsHolder.build(getClass().getName(), p);
-        Object[] transferList = getTransferList(paramsHolder.params);
-        if (transferList != null) {
-            worker.postMessage(paramsHolder, transferList);
-        } else {
-            worker.postMessage(paramsHolder);
-        }
-    }
-
-    protected abstract Result doInBackground(Params p) throws Exception;
-
-    protected abstract void done(Result r);
-
-    protected void onError(String type, String message) {
-    }
-
-    private <T> T castDoubleTo(String type, Double o) {
+    private static <T> T castDoubleTo(String type, Double o) {
         if (type.equals(Integer.class.getName())) {
             return (T) Integer.valueOf(o.toString());
         } else if (type.equals(Long.class.getName())) {
@@ -207,6 +171,59 @@ public abstract class AsyncTask<Params, Result> {
             return (T) Float.valueOf(o.toString());
         }
         return (T) o;
+    }
+
+    private Worker<ParamsHolder> worker;
+
+    public final void execute(Params p) {
+        if (worker == null) {
+            worker = new Worker(GWT.<WorkerScriptFactory>create(WorkerScriptFactory.class
+            ).getWorkerScriptURL());
+            worker.setOnMessage((MessageListener<ResultHolder>) (MessageEvent<ResultHolder> s) -> {
+                if (s.getData().failed()) {
+                    onError(s.getData().exceptionType, s.getData().exceptionMessage);
+                } else if (s.getData().progressData) {
+                    if (s.getData().dataType != null) {
+                        process(castDoubleTo(s.getData().dataType, (Double) s.getData().data));
+                    } else {
+                        process((Progress) s.getData().data);
+                    }
+                } else {
+                    if (s.getData().dataType != null) {
+                        done(castDoubleTo(s.getData().dataType, (Double) s.getData().data));
+                    } else {
+                        done((Result) s.getData().data);
+                    }
+                }
+            });
+        }
+        ParamsHolder paramsHolder = ParamsHolder.build(getClass().getName(), p);
+        Object[] transferList = getTransferList(paramsHolder.data);
+        if (transferList != null) {
+            worker.postMessage(paramsHolder, transferList);
+        } else {
+            worker.postMessage(paramsHolder);
+        }
+    }
+
+    public final void publish(Progress r) {
+        ResultHolder build = ResultHolder.build(r, true);
+        Object[] transferList = getTransferList(build.data);
+        if (transferList != null) {
+            postMessage(build, transferList);
+        } else {
+            postMessage(build);
+        }
+    }
+
+    protected abstract Result doInBackground(Params p) throws Exception;
+
+    protected abstract void done(Result r);
+
+    protected void process(Progress r) {
+    }
+
+    protected void onError(String type, String message) {
     }
 
     @JsProperty(namespace = JsPackage.GLOBAL, name = "onmessage")
