@@ -9,7 +9,6 @@ import com.google.gwt.core.client.GWT;
 import com.google.gwt.core.client.JavaScriptObject;
 import com.google.gwt.json.client.JSONNumber;
 import com.google.gwt.json.client.JSONObject;
-import com.google.gwt.typedarrays.shared.ArrayBuffer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Level;
@@ -27,38 +26,35 @@ import jsinterop.annotations.JsType;
  * @param <Result>
  */
 @JsType
+@SuppressWarnings("UseSpecificCatch")
 public abstract class AsyncTask<Params, Result> {
 
     static {
-        setOnMessage(new MessageListener<ParamsHolder>() {
-            @Override
-            public void on(MessageEvent<ParamsHolder> s) {
-                if (!s.getData().type.matches("[a-z]+\\.([a-z]+\\.)*([a-zA-Z][A-Za-z\\d]*\\$?)+")) {
-                    throw new IllegalArgumentException(s.getData().type + " is not a valid class name. Implementation of AsyncTask can't be anonymous inner class.");
+        setOnMessage((MessageListener<ParamsHolder>) (MessageEvent<ParamsHolder> s) -> {
+            if (!s.getData().type.matches("[a-z]+\\.([a-z]+\\.)*([a-zA-Z][A-Za-z\\d]*\\$?)+")) {
+                throw new IllegalArgumentException(s.getData().type + " is not a valid class name. Implementation of AsyncTask can't be anonymous inner class.");
+            }
+            AsyncTask construct = evalQuietly("new "+s.getData().type.replace('$', '.'));
+            if (construct == null) {
+                throw new IllegalArgumentException(s.getData().type + " must be annotated with @JsType");
+            }
+            try {
+                Object doInBackground;
+                if ("Number".equals(s.getData().dataType)) {
+                    doInBackground = construct.doInBackground(new JSONObject((JavaScriptObject) s.getData().params).get("Number").isNumber().doubleValue());
+                } else {
+                    doInBackground = construct.doInBackground(s.getData().params);
                 }
-                Object eval = evalQuietly(s.getData().type.replace('$', '.'));
-                if (eval == null) {
-                    throw new IllegalArgumentException(s.getData().type + " must be annotated with @JsType");
+                ResultHolder build = ResultHolder.build(doInBackground);
+                Object[] transferList = getTransferList(build.result);
+                if (transferList != null) {
+                    postMessage(build, transferList);
+                } else {
+                    postMessage(build);
                 }
-                try {
-                    AsyncTask construct = (AsyncTask) getReflect().construct(eval, new Object[0]);
-                    Object doInBackground;
-                    if ("Number".equals(s.getData().dataType)) {
-                        doInBackground = construct.doInBackground(new JSONObject((JavaScriptObject)s.getData().params).get("Number").isNumber().doubleValue());
-                    } else {
-                        doInBackground = construct.doInBackground(s.getData().params);
-                    }
-                    ResultHolder build = ResultHolder.build(doInBackground);
-                    Object[] transferList = getTransferList(build.result);
-                    if (transferList != null) {
-                        postMessage(build, transferList);
-                    } else {
-                        postMessage(build);
-                    }
-                } catch (Throwable ex) {
-                    postMessage(ResultHolder.build(ex));
-                    error(ex);
-                }
+            } catch (Throwable ex) {
+                postMessage(ResultHolder.build(ex));
+                error(ex);
             }
         });
     }
@@ -99,11 +95,11 @@ public abstract class AsyncTask<Params, Result> {
         @JsOverlay
         static <Result> ResultHolder<Result> build(Result result) {
             if (result instanceof String || result instanceof Number) {
-                ResultHolder<Result> resultHolder = new ResultHolder<Result>();
+                ResultHolder<Result> resultHolder = new ResultHolder<>();
                 resultHolder.result = result;
                 return resultHolder;
             } else {
-                ResultHolder<JavaScriptObject> resultHolder = new ResultHolder<JavaScriptObject>();
+                ResultHolder<JavaScriptObject> resultHolder = new ResultHolder<>();
                 resultHolder.result = (JavaScriptObject) result;
                 return (ResultHolder<Result>) resultHolder;
             }
@@ -127,22 +123,17 @@ public abstract class AsyncTask<Params, Result> {
 
     private Worker<ParamsHolder> worker;
 
-    public AsyncTask() {
-        if (isMainThread()) {
-            worker = new Worker(GWT.getModuleBaseURL() + GWT.getModuleName() + ".worker.js");
-            worker.setOnMessage(new MessageListener<ResultHolder<Result>>() {
-                public void on(MessageEvent<ResultHolder<Result>> s) {
-                    if (s.getData().failed()) {
-                        onError(s.getData().exceptionType, s.getData().exceptionMessage);
-                    } else {
-                        done(s.getData().result);
-                    }
+    public void execute(Params p) {
+        if (worker == null) {
+            worker = new Worker(GWT.<WorkerScriptFactory>create(WorkerScriptFactory.class).getWorkerScriptURL());
+            worker.setOnMessage((MessageListener<ResultHolder<Result>>) (MessageEvent<ResultHolder<Result>> s) -> {
+                if (s.getData().failed()) {
+                    onError(s.getData().exceptionType, s.getData().exceptionMessage);
+                } else {
+                    done(s.getData().result);
                 }
             });
         }
-    }
-
-    public void execute(Params p) {
         ParamsHolder paramsHolder = ParamsHolder.build(getClass().getName(), p);
         Object[] transferList = getTransferList(paramsHolder.params);
         try {
@@ -175,26 +166,13 @@ public abstract class AsyncTask<Params, Result> {
     @JsMethod(namespace = JsPackage.GLOBAL, name = "eval")
     private static native <T> T eval(String s) throws Exception;
 
-    @JsProperty(namespace = JsPackage.GLOBAL, name = "Reflect")
-    private static native <T> Reflect<T> getReflect();
-
-    @JsProperty(namespace = JsPackage.GLOBAL, name = "window")
-    private static native <Func> Func window();
-
     @JsMethod(namespace = "console", name = "error")
     protected static native void error(Object o);
 
-    @JsMethod(namespace = JsPackage.GLOBAL, name = "Array.isArray")
-    private static native boolean isArray(Object o);
+    @JsMethod(namespace = JsPackage.GLOBAL, name = "Object.create")
+    protected static native <T,P> T create(P prototype);
 
-    @JsMethod(namespace = JsPackage.GLOBAL, name = "ArrayBuffer.prototype.toString")
-    private static native String arrayBufferType();
-
-    private boolean isMainThread() {
-        return window() != null;
-    }
-
-    private static Object evalQuietly(String s) {
+    private static <T> T evalQuietly(String s) {
         try {
             return eval(s);
         } catch (Exception ex) {
@@ -202,13 +180,13 @@ public abstract class AsyncTask<Params, Result> {
         }
     }
 
-    private static final Object[] getTransferList(Object params) {
+    private static Object[] getTransferList(Object params) {
         if (params instanceof String || params instanceof Number) {
             return null;
         }
         if (TypeHelper.isTransferable(params)) {
-            ArrayBuffer[] transferList = new ArrayBuffer[1];
-            transferList[0] = (ArrayBuffer) params;
+            Object[] transferList = new Object[1];
+            transferList[0] = params;
             return transferList;
         } else {
             JSONObject jsParams = new JSONObject((JavaScriptObject) params);

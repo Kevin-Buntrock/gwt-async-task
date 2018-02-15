@@ -32,7 +32,7 @@ public class JsLinker extends SingleScriptLinker {
         if (artifacts.find(CompilationResult.class).isEmpty()){
             return null;
         }
-        StringBuilder builder = new StringBuilder("$wnd=self;\n");
+        StringBuilder builder = new StringBuilder("var $wnd=self;");
         builder.append(artifacts.find(CompilationResult.class).first().getJavaScript()[0]);
         return emitString(logger, builder.toString(), context.getModuleName()+".worker.js");
     }

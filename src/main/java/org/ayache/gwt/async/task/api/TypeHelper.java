@@ -7,6 +7,7 @@ package org.ayache.gwt.async.task.api;
 
 import jsinterop.annotations.JsMethod;
 import jsinterop.annotations.JsPackage;
+import jsinterop.annotations.JsProperty;
 
 /**
  *
@@ -15,8 +16,8 @@ import jsinterop.annotations.JsPackage;
 public final class TypeHelper {
 
     public static boolean isTransferable(Object o) {
-        String type = Helper.type(o); 
-        return type.equals(Helper.getArrayBufferType()) || type.equals(Helper.getImageBitmapType()) || type.equals(Helper.getMessagePortType());
+        String type = Helper.type(o);
+        return type.equals(Helper.getArrayBufferType()) || (Helper.getImageBitmap() != null && type.equals(Helper.getImageBitmapType())) || type.equals(Helper.getMessagePortType());
     }
 
     private static class Helper {
@@ -26,6 +27,9 @@ public final class TypeHelper {
 
         @JsMethod(namespace = JsPackage.GLOBAL, name = "ImageBitmap.prototype.toString")
         static native String getImageBitmapType();
+
+        @JsProperty(namespace = JsPackage.GLOBAL, name = "ImageBitmap")
+        static native Object getImageBitmap();
 
         @JsMethod(namespace = JsPackage.GLOBAL, name = "MessagePort.prototype.toString")
         static native String getMessagePortType();
