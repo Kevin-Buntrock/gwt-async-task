@@ -5,6 +5,8 @@
  */
 package org.ayache.gwt.async.task.api;
 
+import com.google.gwt.core.client.JavaScriptObject;
+import com.google.gwt.core.client.JsArray;
 import jsinterop.annotations.JsMethod;
 import jsinterop.annotations.JsPackage;
 import jsinterop.annotations.JsProperty;
@@ -26,12 +28,15 @@ public class Worker<P> {
     public native void postMessage(P s);
 
     @JsMethod(name = "postMessage")
-    public native <Transferable> void postMessage(P s, Transferable[] transferList);
+    public native <Transferable extends JavaScriptObject> void postMessage(P s, JsArray<Transferable> transferList);
 
     @JsMethod(name = "terminate")
     public native void terminate();
 
     @JsProperty(name = "onmessage")
     public native void setOnMessage(MessageListener listener);
+
+    @JsProperty(namespace = JsPackage.GLOBAL, name = "DedicatedWorkerGlobalScope")
+    public static native Object workerScope();
 
 }

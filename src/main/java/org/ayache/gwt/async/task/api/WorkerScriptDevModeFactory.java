@@ -6,8 +6,9 @@
 package org.ayache.gwt.async.task.api;
 
 import com.google.gwt.core.client.GWT;
-import com.google.gwt.typedarrays.client.JsUtils;
 import com.google.gwt.typedarrays.shared.ArrayBuffer;
+import com.google.gwt.xhr.client.ReadyStateChangeHandler;
+import com.google.gwt.xhr.client.XMLHttpRequest;
 
 /**
  *
@@ -15,20 +16,45 @@ import com.google.gwt.typedarrays.shared.ArrayBuffer;
  */
 class WorkerScriptDevModeFactory extends WorkerScriptFactory {
 
-    private static final String URL;
+    private static String URL;
+    private IScriptListener listener;
 
-    static {
-        XMLHttpRequest create = XMLHttpRequest.create();
-        create.open("GET", GWT.getModuleBaseURL().replace("8888", "9876") + GWT.getModuleName() + ".worker.js", false);
-        create.send();
-        Blob.Options options = new Blob.Options();
-        options.type = "application/javascript";
-        Blob blob = new Blob(new ArrayBuffer[]{JsUtils.arrayBufferFromString(create.getResponseText())}, options);
-        URL = Blob.createObjectURL(blob);
+    private static String getOrigin() {
+        String origin = new URL(GWT.getModuleBaseURL()).getOrigin();
+        String[] split = origin.split(":");
+        if (split.length == 1) {
+            return origin + ":9876/";
+        } else {
+            return GWT.getModuleBaseURL().replace("8888", "9876");
+        }
+    }
+
+    @Override
+    void addScriptListener(IScriptListener listener) {
+        if (URL != null){
+            listener.onScriptReceived(URL);
+        }
     }
 
     @Override
     public String getWorkerScriptURL() {
+        if (URL == null) {
+            XMLHttpRequest create = XMLHttpRequest.create();
+            create.open("GET", getOrigin() + GWT.getPermutationStrongName() + ".worker.js");
+            create.setResponseType(XMLHttpRequest.ResponseType.ArrayBuffer);
+            create.setOnReadyStateChange(new ReadyStateChangeHandler() {
+                @Override
+                public void onReadyStateChange(XMLHttpRequest xhr) {
+                    if (xhr.getReadyState() == XMLHttpRequest.DONE) {
+                        Blob.Options options = new Blob.Options();
+                        options.type = "text/plain";
+                        URL = Blob.createObjectURL(new Blob(new ArrayBuffer[]{xhr.getResponseArrayBuffer()}, options));
+                    }
+                }
+            });
+            create.send();
+
+        }
         return URL;
     }
 

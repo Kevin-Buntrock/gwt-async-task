@@ -14,6 +14,14 @@ import com.google.gwt.core.client.GWT;
 class WorkerScriptFactory {
 
     String getWorkerScriptURL() {
-        return GWT.getModuleBaseURL() + GWT.getModuleName() + ".worker.js";
+        return GWT.getModuleBaseURL() + GWT.getPermutationStrongName() + ".worker.js";
+    }
+
+    void addScriptListener(IScriptListener listener){}
+    
+    interface IScriptListener {
+
+        void onScriptReceived(String url);
+
     }
 }

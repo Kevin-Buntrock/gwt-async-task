@@ -13,30 +13,43 @@ import com.google.gwt.core.ext.linker.CompilationResult;
 import com.google.gwt.core.ext.linker.EmittedArtifact;
 import com.google.gwt.core.ext.linker.LinkerOrder;
 import com.google.gwt.core.ext.linker.LinkerOrder.Order;
-import com.google.gwt.core.linker.SingleScriptLinker;
+import com.google.gwt.core.linker.CrossSiteIframeLinker;
+import java.util.SortedSet;
 
 /**
  *
  * @author Ayache
  */
 @LinkerOrder(Order.POST)
-public class JsLinker extends SingleScriptLinker {
-    
+public class JsLinker extends CrossSiteIframeLinker {
+
     @Override
     public String getDescription() {
         return "Javascript Linker";
     }
 
     @Override
-    protected EmittedArtifact emitSelectionScript(TreeLogger logger, LinkerContext context, ArtifactSet artifacts) throws UnableToCompleteException {
-        if (artifacts.find(CompilationResult.class).isEmpty()){
-            return null;
-        }
-        StringBuilder builder = new StringBuilder("var $wnd=self;");
-        builder.append(artifacts.find(CompilationResult.class).first().getJavaScript()[0]);
-        return emitString(logger, builder.toString(), context.getModuleName()+".worker.js");
+    protected void maybeAddHostedModeFile(TreeLogger logger, LinkerContext context,
+            ArtifactSet artifacts, CompilationResult result) throws UnableToCompleteException {
+        SortedSet<CompilationResult> find = artifacts.find(CompilationResult.class);
+
+        find.forEach((CompilationResult t) -> {
+            try {
+                StringBuilder builder = new StringBuilder("var $wnd=self;\n");
+                builder.append(t.getJavaScript()[0]);
+                artifacts.add(emitString(logger, builder.toString(), t.getStrongName() + ".worker.js"));
+            } catch (UnableToCompleteException ex) {
+                logger.log(TreeLogger.Type.ERROR, "Unable to create worker javascript file", ex);
+            }
+        });
+
     }
 
+    @Override
+    protected EmittedArtifact emitSelectionScript(TreeLogger logger, LinkerContext context, ArtifactSet artifacts) throws UnableToCompleteException {
+        return null;
+    }
+    
     
 
 }
